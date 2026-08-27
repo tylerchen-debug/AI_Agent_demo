@@ -1,0 +1,15 @@
+langgraph>=0.2.60
+langchain-core>=0.3.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+python-dotenv>=1.0.0
+
+# LLM backend. Pick via LLM_PROVIDER=openai|bedrock|vllm (a real LLM is required):
+#   openai / vllm  -> langchain-openai (vLLM is OpenAI-compatible)
+#   bedrock        -> langchain-aws
+langchain-openai>=0.2.0
+langchain-aws>=0.2.0
+
+# Bedrock image generation, required (design = SD3.5 Large, preview = Stable Image Inpaint).
+boto3>=1.34.0
+Pillow>=10.0.0
