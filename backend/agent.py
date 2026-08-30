@@ -130,13 +130,16 @@ def _text(msg) -> str:
 
 def _thinking(msg) -> str:
     """Model's internal reasoning summary, if the provider returned one."""
-    # OpenAI Responses API: content blocks of type 'reasoning' carry summaries.
     parts = []
+    # langchain-openai default (output_version="v0"): reasoning in additional_kwargs.
+    blocks = [getattr(msg, "additional_kwargs", {}).get("reasoning", {})]
+    # output_version="responses/v1": reasoning as content blocks.
     if isinstance(msg.content, list):
-        for b in msg.content:
-            if isinstance(b, dict) and b.get("type") == "reasoning":
-                for s in b.get("summary", []):
-                    parts.append(s.get("text", "") if isinstance(s, dict) else str(s))
+        blocks += [b for b in msg.content
+                   if isinstance(b, dict) and b.get("type") == "reasoning"]
+    for b in blocks:
+        for s in b.get("summary", []):
+            parts.append(s.get("text", "") if isinstance(s, dict) else str(s))
     return "\n".join(p for p in parts if p).strip()
 
 
