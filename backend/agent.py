@@ -39,7 +39,8 @@ For an in-scope request, you have these capabilities:
   - generate the design image from a prompt,
   - draft an image prompt for a design matching the recipient's interests.
 You decide the order and which steps are needed, but you must generate a preview
-before finishing.
+before finishing. Design prompts must describe ONLY the flat artwork itself,
+never the product it will be printed on (the preview step handles that).
 
 BEFORE calling any tool, first reply with a short numbered PLAN (one line per
 step) that decomposes the task, then start executing it. Before EACH tool call,
@@ -205,13 +206,19 @@ async def _run_tool(emit, cur, patch, name, args):
 
     if name == "draft_prompt":
         p = chat("Write ONE concise text-to-image prompt (under 80 words) based on this "
-                 f"idea: {args.get('concept', '')}")
+                 f"idea: {args.get('concept', '')}\n"
+                 "The prompt must describe ONLY the flat artwork/illustration itself — "
+                 "it will later be printed onto a product. Do NOT mention any physical "
+                 "product or object it could be printed on (mug, t-shirt, bag, poster, "
+                 "mockup, etc.).")
         patch["design_prompt"] = p
         return p, [p], None
 
     if name == "rewrite_prompt_with_style":
         p = chat(f"Rewrite this text-to-image prompt to apply the visual style "
-                 f"{args.get('style', '')!r}; keep it under 80 words:\n{args.get('prompt', '')}")
+                 f"{args.get('style', '')!r}; keep it under 80 words. The prompt must "
+                 "describe only the flat artwork itself — do NOT mention any physical "
+                 f"product it could be printed on:\n{args.get('prompt', '')}")
         patch["design_prompt"] = p
         return p, [p], None
 
