@@ -10,6 +10,7 @@ The design step needs Bedrock credentials; missing config raises a clear error.
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 import imagegen
@@ -34,9 +35,10 @@ CATALOG = [
 ]
 
 
-def search_products(query: str) -> list[dict]:
-    """Return the catalog (fake product search)."""
-    return list(CATALOG)
+def search_products(query: str, budget: float = 50) -> list[dict]:
+    """Return in-budget products in random order (fake search; avoids first-item bias)."""
+    hits = [p for p in CATALOG if p["price"] <= budget]
+    return random.sample(hits, k=len(hits))
 
 
 # ---------------------------------------------------------------------------

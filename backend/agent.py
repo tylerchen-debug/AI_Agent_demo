@@ -30,18 +30,28 @@ from llm import chat
 
 
 SYSTEM_PROMPT = """You are a gift-design assistant. You ONLY help users design and \
-preview CUSTOM PRINTED GIFTS (mugs, t-shirts, tote bags) using your tools.
+preview CUSTOM PRINTED GIFTS using your tools.
 
-For an in-scope request, decide which tools to call and in what order to:
-  1. search the catalog for a product that fits the recipient and budget,
-  2. draft an image prompt for a design matching the recipient's interests,
-  3. optionally rewrite the prompt with a visual style,
-  4. generate the design image,
-  5. generate a preview of that design on the chosen product.
+For an in-scope request, you have these capabilities:
+  - generate a preview of a design on a chosen product,
+  - rewrite an image prompt with a visual style (optional),
+  - search the catalog for a product that fits the recipient and budget,
+  - generate the design image from a prompt,
+  - draft an image prompt for a design matching the recipient's interests.
 You decide the order and which steps are needed, but you must generate a preview
-before finishing. Before EACH tool call, state in one short sentence what you are
-about to do and why (this is shown to the user). End with a short recommendation:
-the product, the design idea, and one sentence on why it fits.
+before finishing.
+
+BEFORE calling any tool, first reply with a short numbered PLAN (one line per
+step) that decomposes the task, then start executing it. Before EACH tool call,
+state in one short sentence which plan step you are executing and why (this is
+shown to the user). If the plan changes mid-way, briefly say what changed.
+
+When choosing the product, compare ALL catalog candidates against the
+recipient's interests and budget, and explicitly explain in 1-2 sentences why
+the chosen product beats the alternatives — do this BEFORE generating the
+preview. Do not default to the first search result. End with a short
+recommendation: the product, the design idea, and one or two sentences on
+why it fits.
 
 If the request is NOT about designing or previewing a printed gift (e.g. booking
 hotels or flights, writing code, general questions), politely REFUSE in one or
@@ -51,8 +61,9 @@ two sentences and do NOT call any tools."""
 # --- Tool schemas the model can call (executed manually in tools_node) --------
 
 @tool
-def search_product_catalog(query: str) -> str:
-    """Search the printable gift catalog. Returns products with id, name, price."""
+def search_product_catalog(query: str, budget: float = 50) -> str:
+    """Search the printable gift catalog for products priced within `budget` (USD).
+    Returns products with id, name, price."""
 
 
 @tool
@@ -109,11 +120,24 @@ async def data(emit: Emit, field: str, value) -> None:
 
 
 def _text(msg) -> str:
-    """Message content as plain text (Anthropic returns a list of blocks)."""
+    """Message content as plain text (some providers return a list of blocks)."""
     c = msg.content
     if isinstance(c, list):
-        return " ".join(b.get("text", "") for b in c if isinstance(b, dict)).strip()
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict)
+                        and b.get("type") != "reasoning").strip()
     return c or ""
+
+
+def _thinking(msg) -> str:
+    """Model's internal reasoning summary, if the provider returned one."""
+    # OpenAI Responses API: content blocks of type 'reasoning' carry summaries.
+    parts = []
+    if isinstance(msg.content, list):
+        for b in msg.content:
+            if isinstance(b, dict) and b.get("type") == "reasoning":
+                for s in b.get("summary", []):
+                    parts.append(s.get("text", "") if isinstance(s, dict) else str(s))
+    return "\n".join(p for p in parts if p).strip()
 
 
 def _fmt_args(args: dict) -> list[str]:
@@ -133,6 +157,10 @@ async def agent_node(state: State, config) -> dict:
 
     model = llm.get_model().bind_tools(TOOLS)
     resp = await model.ainvoke(msgs)
+
+    thinking = _thinking(resp)
+    if thinking:  # the model's actual chain-of-thought summary (reasoning models only)
+        await trace(emit, "thought", "Thinking 🧠", text=thinking)
 
     if resp.tool_calls:
         reasoning = _text(resp)
@@ -166,21 +194,21 @@ async def tools_node(state: State, config) -> dict:
 async def _run_tool(emit, cur, patch, name, args):
     """Execute one tool call. Returns (text_for_model, output_lines, image) and mutates `patch`."""
     if name == "search_product_catalog":
-        products = tools.search_products(args.get("query", ""))
+        products = tools.search_products(args.get("query", ""), args.get("budget", 50))
         patch["products"] = products
         await data(emit, "products", products)
         result = json.dumps([{k: p[k] for k in ("id", "name", "price", "note")} for p in products])
         return result, [f"{p['name']} (${p['price']}) — id={p['id']}" for p in products], None
 
     if name == "draft_prompt":
-        p = chat("Write ONE concise text-to-image prompt (under 40 words) for this gift "
-                 f"design concept: {args.get('concept', '')}")
+        p = chat("Write ONE concise text-to-image prompt (under 80 words) based on this "
+                 f"idea: {args.get('concept', '')}")
         patch["design_prompt"] = p
         return p, [p], None
 
     if name == "rewrite_prompt_with_style":
         p = chat(f"Rewrite this text-to-image prompt to apply the visual style "
-                 f"{args.get('style', '')!r}; keep it under 40 words:\n{args.get('prompt', '')}")
+                 f"{args.get('style', '')!r}; keep it under 80 words:\n{args.get('prompt', '')}")
         patch["design_prompt"] = p
         return p, [p], None
 
@@ -233,7 +261,6 @@ def build_graph():
 
 
 GRAPH = build_graph()
-
 
 def initial_state(user_request: str) -> dict:
     return {"messages": [SystemMessage(SYSTEM_PROMPT), HumanMessage(user_request)]}

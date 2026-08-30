@@ -39,7 +39,16 @@ _model = None
 
 def _build_openai():
     from langchain_openai import ChatOpenAI
-    return ChatOpenAI(model=os.getenv("DEMO_MODEL", "gpt-4o-mini"), temperature=0.7)
+    model = os.getenv("DEMO_MODEL", "gpt-4o-mini")
+    # Reasoning models (o-series / gpt-5) can return a thinking summary,
+    # but only via the Responses API; they also reject custom temperature.
+    if model.startswith(("o", "gpt-5")):
+        return ChatOpenAI(
+            model=model,
+            use_responses_api=True,
+            reasoning={"effort": "medium", "summary": "auto"},
+        )
+    return ChatOpenAI(model=model, temperature=0.7)
 
 
 def _build_vllm():
@@ -73,4 +82,8 @@ def get_model():
 
 def chat(prompt: str) -> str:
     """Return the LLM's text response for `prompt`."""
-    return get_model().invoke(prompt).content.strip()
+    c = get_model().invoke(prompt).content
+    if isinstance(c, list):  # Responses API returns content blocks
+        c = " ".join(b.get("text", "") for b in c
+                     if isinstance(b, dict) and b.get("type") == "text")
+    return c.strip()
